@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuizZone: Kundalik Sinovlar</title>
+    <!-- Tailwind CSS yuklash -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter shriftidan foydalanish -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .scroll-area::-webkit-scrollbar {
+            width: 6px;
+        }
+        .scroll-area::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Asosiy Ilova Konteyneri -->
+    <div id="app" class="flex flex-col flex-grow">
+        
+        <!-- Sarlavha (Header) -->
+        <header class="bg-white shadow-md sticky top-0 z-10">
+            <div class="max-w-4xl mx-auto px-4 py-3 flex justify-between items-center">
+                <div class="flex items-center space-x-2">
+                    <span class="text-3xl">🧠</span>
+                    <h1 class="text-2xl font-bold text-gray-800">QuizZone</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <!-- Telegram Havolasi -->
+                    <a href="https://t.me/Raimjonov_28" target="_blank" title="Rasmiy Telegram Kanalimiz">
+                        <svg class="w-7 h-7 text-blue-500 hover:text-blue-600 transition" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 11.944 0zM17 8.3l-2.733 11.2c-.22 1.05-.8 1.15-.17 1.76.01.2 1.48-.68 1.48-.68l-1.3-4.57-2.72-2.3-4.73 2.5 1.5-6.23 6.36-4.9c.77-.55 1.25-.33 1.04-.15-.4 0-.96.22-1.8.84l-.84.6-4.5 2.9-.66 2.37-1.3 4.5 4.7-2.5 2.3 2.3 4.57 1.3c.77-.38 1.25-.8 1.5-1.07.15-.22.5-.22.5-.22l-.46-1.55c.34-.34.9-.77 1.24-1.3l.5-.83c.33-.55.22-.84 0-1.07l-3.3-3.13z"/>
+                        </svg>
+                    </a>
+                    <div id="user-info" class="text-sm text-gray-600 flex items-center space-x-2">
+                        <!-- Foydalanuvchi ID si va umumiy balli -->
+                        <span id="user-id-display" class="font-mono text-xs bg-gray-100 p-1 rounded">...</span>
+                        <span id="total-score-display" class="font-bold text-green-600">Ball: 0</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Asosiy Kontent Maydoni -->
+        <main class="flex-grow max-w-4xl mx-auto w-full p-4">
+            <!-- Dinamik Sahifa Kontenti JavaScript orqali yuklanadi -->
+            <div id="page-content" class="space-y-6">
+                <!-- Kontent JS tomonidan kiritiladi -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Maxsus Modal (ogohlantirish/tasdiqlash uchun) -->
+    <div id="modal-container" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-lg shadow-2xl max-w-sm w-full space-y-4">
+            <h3 id="modal-title" class="text-xl font-bold text-gray-800"></h3>
+            <p id="modal-message" class="text-gray-600"></p>
+            <div id="modal-actions" class="flex justify-end space-x-3">
+                <button id="modal-close-btn" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition">Yopish</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Firebase Modul Skriptlari -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase loglash darajasini sozlash
+        setLogLevel('Debug');
+
+        // --- GLOBAL O'ZGARUVCHILAR (Canvas Muhitidan Taqdim etilgan) ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-quiz-app';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- ASOSIY FIREBASE SOZLAMALARI ---
+        let app;
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        // Firebase'ni ishga tushirish
+        if (Object.keys(firebaseConfig).length > 0) {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+        } else {
+            console.error("Firebase konfiguratsiyasi yetishmayapti. Ma'lumotlar saqlanmaydi.");
+        }
+
+        // --- GLOBAL ILOVA HOLATI ---
+        const state = {
+            currentPage: 'home',
+            isSubscribed: false, // Telegram Obunasini simulyatsiya qilish
+            quizzes: [],
+            currentQuiz: null,
+            currentQuestionIndex: 0,
+            currentQuizScore: 0,
+            userTotalScore: 0,
+            userName: "Anonim",
+            quizInProgress: false,
+        };
+
+        const QUIZ_TYPES = [
+            { type: 'iq', name: '🧠 IQ Sinovi', emoji: '💡', description: "Mantiq, mulohaza va naqshni aniqlash qobiliyatingizni sinang." },
+            { type: 'temperament', name: '🎭 Temperament Turi', emoji: '😊', description: "O'zingizning asosiy shaxsiyat xususiyatlaringizni kashf eting." },
+            { type: 'profession', name: '💼 Kasb Tanlash', emoji: '🛠️', description: "Sizga eng mos keladigan kasb yo'nalishini toping." },
+            { type: 'quick_think', name: '⏱️ Tez Fikrlash', emoji: '⚡', description: "Vaxtga qarshi tezkor savollar bilan fikrlash tezligingizni sinovdan o'tkazing." },
+            { type: 'smart_quiz', name: '⭐ Umumbilim Sinovi', emoji: '🧐', description: "Umumiy bilimlar va qiziqarli ma'lumotlar sinovi." },
+            { type: 'photoshop', name: '🎨 Photoshop Sinovi', emoji: '🖼️', description: "Vizual tushuncha va rasmlarni manipulyatsiya qilishga oid boshqotirmalar." },
+        ];
+
+        // --- SAVOLLAR BAZASI (O'zbek tiliga o'girilgan savollar) ---
+        const QUESTIONS_POOL = [
+            // IQ Test (type: iq)
+            { id: 1, type: 'iq', text: "Quyidagi ketma-ketlikda qaysi raqam keyingi o'rinda keladi: 2, 4, 8, 16, ...?", options: ["24", "32", "30", "28"], answer: "32", points: 15 },
+            { id: 2, type: 'iq', text: "Agar 'KITOB' so'zi '11292025' deb kodlansa, 'QALAM' so'zi qanday kodlanadi? (Kodlash usuli harfning alifbodagi o'rni)", options: ["1711213", "17112113", "1712131", "171121"], answer: "17112113", points: 20 }, // K=11, I=9, T=20, O=15, B=2. (Bu savol CAT=3120 dan farqli, lekin o'zbek tiliga moslandi).
+            { id: 3, type: 'iq', text: "Mening shaharlarim bor, lekin uylarim yo'q. Tog'larim bor, lekin daraxtlarim yo'q. Suvim bor, lekin baliqlarim yo'q. Men nima bo'lishim mumkin?", options: ["Xarita", "Globus", "Kitob", "Ko'zgu"], answer: "Xarita", points: 10 },
+            { id: 4, type: 'iq', text: "49 ning 3/7 qismi qancha bo'ladi?", options: ["21", "14", "28", "7"], answer: "21", points: 15 },
+            { id: 5, type: 'iq', text: "Guruhga mos kelmaydiganini toping: Olma, Apelsin, Banan, Kartoshka.", options: ["Olma", "Apelsin", "Banan", "Kartoshka"], answer: "Kartoshka", points: 10 },
+            { id: 6, type: 'iq', text: "Bir kishi portretga qarab turib, shunday deydi: 'Mening akalarim va singillarim yo'q, lekin bu odamning otasi, mening otamning o'g'li'. Portretdagi odam kim?", options: ["Uning o'g'li", "O'zining otasi", "Uning amakisi", "O'zining akasi"], answer: "Uning o'g'li", points: 25 },
+            { id: 7, type: 'iq', text: "Agar barcha Zatlar Patlar bo'lsa va ba'zi Patlar Ratlar bo'lsa, ba'zi Zatlar Ratlar bo'lishi rostmi?", options: ["Ha", "Yo'q", "Balki", "Aniq aytib bo'lmaydi"], answer: "Aniq aytib bo'lmaydi", points: 15 },
+            { id: 8, type: 'iq', text: "2 + 2 * 3 - 1 qanchaga teng?", options: ["7", "5", "8", "6"], answer: "7", points: 10 },
+            // Temperament Test (type: temperament) - Ball to'plash uchun savollar
+            { id: 10, type: 'temperament', text: "Stressli vaziyatga duch kelganingizda, odatda...", options: ["Vaziyatni o'z qo'limga olib, yechimni tashkil qilaman.", "Hammani xotirjam qilishga harakat qilaman.", "Faktlarni tahlil qilib, mantiqan qaror qabul qilaman.", "Kutaman va boshqalarning nima qilishini kuzataman."], answer: "Vaziyatni o'z qo'limga olib, yechimni tashkil qilaman.", points: 10 },
+            { id: 11, type: 'temperament', text: "Siz ijtimoiy yig'ilishlarda qaysi vaziyatni afzal ko'rasiz?", options: ["Diqqat markazida bo'lishni, hikoyalar aytishni.", "Ovqat va ichimliklarni tayyorlashga yordam berishni.", "Chuqur, yakkama-yakka muhokamada qatnashishni.", "Chetda turib jim kuzatishni."], answer: "Diqqat markazida bo'lishni, hikoyalar aytishni.", points: 10 },
+            { id: 12, type: 'temperament', text: "Do'stlaringiz sizni qanday ta'riflaydi?", options: ["Qat'iyatli va ambitsiyali.", "Sadoqatli va ishonchli.", "Ijodiy va innovatsion.", "Xushchaqchaq va g'ayratli."], answer: "Qat'iyatli va ambitsiyali.", points: 10 },
+            { id: 13, type: 'temperament', text: "Sizni eng ko'p bezovta qiladigan narsa...", options: ["Samarasizlik va vaqtni behuda sarflash.", "Boshqalarga nisbatan shafqatsizlik yoki beparvolik.", "Ehtiyotsiz xatolarga yo'l qo'yish.", "Majburiy muloqotga kirishish."], answer: "Samarasizlik va vaqtni behuda sarflash.", points: 10 },
+            { id: 14, type: 'temperament', text: "Sizni nima ko'proq ruhlantiradi?", options: ["Maqsadlarga erishish va muvaffaqiyat.", "Hamjihatlik va tinchlikni saqlash.", "Bilim va tushunchaga ega bo'lish.", "Yangi tajribalardan zavqlanish."], answer: "Maqsadlarga erishish va muvaffaqiyat.", points: 10 },
+            // Profession Choice (type: profession)
+            { id: 20, type: 'profession', text: "Bo'sh vaqtingizni qanday o'tkazishni yoqtirasiz?", options: ["Narsalarni qurish, ta'mirlash yoki loyihalash.", "Odamlarga yoki hayvonlarga g'amxo'rlik qilish.", "Ma'lumotlar yoki murakkab tizimlarni tahlil qilish.", "San'at, musiqa yoki hikoyalar yaratish."], answer: "Narsalarni qurish, ta'mirlash yoki loyihalash.", points: 10 },
+            { id: 21, type: 'profession', text: "Qaysi muhitni afzal ko'rasiz?", options: ["Tirishqoq, tezkor ofis.", "Sokin laboratoriya yoki ustaxona.", "Tabiat bilan ishlash uchun ochiq joy.", "Katta guruhlarga dars berish yoki nutq so'zlash."], answer: "Tirishqoq, tezkor ofis.", points: 10 },
+            { id: 22, type: 'profession', text: "Men jamoani boshqarishdan ko'ra, texnik ko'nikmani mukammal o'zlashtirishni afzal ko'raman.", options: ["Qat'iy qo'shilaman", "Qo'shilaman", "Betarafman", "Qo'shilmayman"], answer: "Qat'iy qo'shilaman", points: 10 },
+            // Quick Thinking Test (type: quick_think)
+            { id: 30, type: 'quick_think', text: "'Kuz' so'zida nechta harf bor?", options: ["3", "4", "5", "6"], answer: "3", points: 10 },
+            { id: 31, type: 'quick_think', text: "Agar bugun dushanba bo'lsa, kechagi kundan keyingi kun nima?", options: ["Seshanba", "Chorshanba", "Juma", "Payshanba"], answer: "Chorshanba", points: 10 },
+            { id: 32, type: 'quick_think', text: "O'zbekiston poytaxti qaysi shahar? (Tez javob bering!)", options: ["Samarqand", "Buxoro", "Toshkent", "Xiva"], answer: "Toshkent", points: 10 },
+            { id: 33, type: 'quick_think', text: "Agar 30 ni yarimga bo'lib, ustiga 10 qo'shsangiz, necha chiqadi?", options: ["25", "70", "35", "50"], answer: "70", points: 20 },
+            // Smart Quiz (type: smart_quiz)
+            { id: 40, type: 'smart_quiz', text: "Oltinning kimyoviy belgisi nima?", options: ["Au", "Ag", "Fe", "Gd"], answer: "Au", points: 10 },
+            { id: 41, type: 'smart_quiz', text: "'G'oyalar' asarini kim yozgan?", options: ["Homer", "Plato", "Navoiy", "Ibn Sino"], answer: "Plato", points: 15 },
+            { id: 42, type: 'smart_quiz', text: "Qutb ayig'ining terisi qanday rangda bo'ladi?", options: ["Oq", "Qora", "Pushti", "Shaffof"], answer: "Qora", points: 10 },
+            // Photoshop Challenge (type: photoshop)
+            { id: 50, type: 'photoshop', text: "Qaysi Blending Mode (Aralashtirish Rejimi) odatda tasvirni qoraytiradi?", options: ["Screen", "Overlay", "Multiply", "Lighten"], answer: "Multiply", points: 15 },
+            { id: 51, type: 'photoshop', text: "Ko'pgina rasm muharrirlarida 'Tanlovni bekor qilish' uchun klaviatura yorlig'i nima?", options: ["Ctrl+D", "Ctrl+Shift+I", "Ctrl+A", "Ctrl+Alt+D"], answer: "Ctrl+D", points: 10 },
+            { id: 52, type: 'photoshop', text: "Terining teksturasini nozik silliqlash uchun qaysi filtr eng yaxshidir?", options: ["Gaussian Blur", "High Pass", "Smart Sharpen", "Surface Blur"], answer: "Surface Blur", points: 20 },
+        ];
+
+        // --- YORDAMCHI FUNKSIYALAR ---
+
+        // Maxsus Modal (alert/confirm o'rniga)
+        const showModal = (title, message, isError = false) => {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            const modalContainer = document.getElementById('modal-container');
+            const closeBtn = document.getElementById('modal-close-btn');
+            
+            if (isError) {
+                document.getElementById('modal-title').classList.add('text-red-600');
+            } else {
+                document.getElementById('modal-title').classList.remove('text-red-600');
+            }
+
+            modalContainer.classList.remove('hidden');
+            
+            closeBtn.onclick = () => {
+                modalContainer.classList.add('hidden');
+            };
+        };
+
+        // Yilning nechanchi kuni ekanligini olish (sinovlarni har kuni o'zgartirish uchun)
+        const getDayOfYear = () => {
+            const now = new Date();
+            const start = new Date(now.getFullYear(), 0, 0);
+            const diff = now - start;
+            const oneDay = 1000 * 60 * 60 * 24;
+            return Math.floor(diff / oneDay);
+        };
+
+        // Kundalik Savollarni Tanlash Mantiqi (HAR KUNI YANGILANISH SIMULYATSIYASI)
+        const getDailyQuestions = () => {
+            const daySeed = getDayOfYear();
+            const dailyQuizzes = [];
+            
+            QUIZ_TYPES.forEach(quizTypeMeta => {
+                const pool = QUESTIONS_POOL.filter(q => q.type === quizTypeMeta.type);
+                if (pool.length < 5) return;
+
+                // Oddiy pseudo-random tanlov (har kuni bir xil 5 ta savol)
+                let selectedQuestions = [];
+                for (let i = 0; i < 5; i++) {
+                    const randomIndex = (daySeed * QUIZ_TYPES.length + i) % pool.length;
+                    selectedQuestions.push(pool[randomIndex]);
+                }
+                
+                dailyQuizzes.push({
+                    ...quizTypeMeta,
+                    questions: selectedQuestions,
+                    totalQuestions: selectedQuestions.length,
+                    totalPoints: selectedQuestions.reduce((sum, q) => sum + q.points, 0)
+                });
+            });
+
+            state.quizzes = dailyQuizzes;
+            console.log("Sinovlar kun uchun yangilandi:", daySeed);
+        };
+
+        // --- FIREBASE MA'LUMOTLAR BILAN ISHLASH ---
+
+        const getPrivateUserDocRef = (uid) => doc(db, `artifacts/${appId}/users/${uid}/userData`, 'profile');
+        const getPublicLeaderboardCollectionRef = () => collection(db, `artifacts/${appId}/public/data/leaderboard`);
+
+        const saveUserData = async () => {
+            if (!userId) return;
+            const userDocRef = getPrivateUserDocRef(userId);
+            try {
+                await setDoc(userDocRef, { 
+                    totalScore: state.userTotalScore,
+                    userName: state.userName,
+                    lastUpdate: new Date()
+                }, { merge: true });
+                console.log("Foydalanuvchi ma'lumotlari muvaffaqiyatli saqlandi.");
+            } catch (e) {
+                console.error("Foydalanuvchi ma'lumotlarini saqlashda xato:", e);
+            }
+        };
+        
+        const loadUserData = async () => {
+            if (!userId) return;
+            const userDocRef = getPrivateUserDocRef(userId);
+            try {
+                const docSnap = await getDoc(userDocRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    state.userTotalScore = data.totalScore || 0;
+                    state.userName = data.userName || `Foydalanuvchi_${userId.substring(0, 4)}`;
+                    updateScoreDisplay();
+                } else {
+                    // Yangi foydalanuvchi profili yaratish
+                    state.userName = `Foydalanuvchi_${userId.substring(0, 4)}`;
+                    await saveUserData();
+                }
+            } catch (e) {
+                console.error("Foydalanuvchi ma'lumotlarini yuklashda xato:", e);
+                showModal("Ma'lumotlar Xatosi", "Profil ma'lumotlaringizni yuklab bo'lmadi. Iltimos, ulanishingizni tekshiring.");
+            }
+        };
+
+        const updatePublicScore = async (score, quizType) => {
+            if (!userId || score === 0) return;
+
+            const leaderboardCollectionRef = getPublicLeaderboardCollectionRef();
+            const leaderboardDocRef = doc(leaderboardCollectionRef, userId);
+
+            try {
+                const docSnap = await getDoc(leaderboardDocRef);
+                let currentTotalScore = docSnap.exists() ? docSnap.data().totalScore || 0 : 0;
+                
+                // Faqat foydalanuvchining yangi umumiy balli avvalgisidan yuqori bo'lsa yangilash
+                if (state.userTotalScore > currentTotalScore) {
+                    await setDoc(leaderboardDocRef, {
+                        userId: userId,
+                        userName: state.userName,
+                        totalScore: state.userTotalScore,
+                        lastCompletedQuiz: quizType,
+                        timestamp: new Date()
+                    }, { merge: true });
+                    console.log("Global yetakchilar kengashi balli yangilandi.");
+                }
+
+            } catch (e) {
+                console.error("Global ballni yangilashda xato:", e);
+            }
+        };
+
+        // --- UI YUKLASH FUNKSIYALARI ---
+
+        const updateScoreDisplay = () => {
+            document.getElementById('user-id-display').textContent = `ID: ${userId.substring(0, 8)}...`;
+            document.getElementById('total-score-display').textContent = `Ball: ${state.userTotalScore}`;
+        };
+
+        const renderPage = () => {
+            const contentDiv = document.getElementById('page-content');
+            contentDiv.innerHTML = '';
+            
+            // Autentifikatsiya holatini tekshirish
+            if (!isAuthReady) {
+                 contentDiv.innerHTML = `<div class="text-center p-8 bg-white rounded-lg shadow-xl"><p class="text-xl font-semibold text-blue-600">Foydalanuvchi profili va sinovlari yuklanmoqda...</p><div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mt-4"></div></div>`;
+                 return;
+            }
+
+            // Obuna tekshiruvini boshlash
+            if (!state.isSubscribed && state.currentPage !== 'verification') {
+                state.currentPage = 'verification';
+            }
+
+            if (state.currentPage === 'verification') {
+                renderVerificationPage(contentDiv);
+            } else if (state.currentPage === 'home') {
+                renderHomePage(contentDiv);
+            } else if (state.currentPage === 'quiz') {
+                renderQuizPage(contentDiv);
+            } else if (state.currentPage === 'result') {
+                renderResultPage(contentDiv);
+            } else if (state.currentPage === 'leaderboard') {
+                renderLeaderboardPage(contentDiv);
+            }
+        };
+
+        const renderVerificationPage = (container) => {
+            container.innerHTML = `
+                <div class="max-w-md mx-auto p-6 bg-red-50 border-4 border-red-300 rounded-xl shadow-2xl text-center space-y-4">
+                    <span class="text-5xl block mb-4">🚫</span>
+                    <h2 class="text-2xl font-bold text-red-700">Kirish Cheklandi</h2>
+                    <p class="text-gray-600">Kundalik sinovlarni ochish uchun avval bizning rasmiy Telegram kanalimizga obuna bo'lishingiz kerak. Tugmani bosing, kanalga obuna bo'ling va avtomatik ravishda sinovlarga o'ting.</p>
+                    
+                    <!-- Faqat bitta tugma: Bosilganda Telegram'ga yo'naltiradi va darhol obuna tekshiruvini simulyatsiya qiladi. -->
+                    <a href="https://t.me/Raimjonov_28" target="_blank" id="telegram-link-and-verify" 
+                       class="block w-full text-center py-3 rounded-xl font-bold text-white bg-blue-500 hover:bg-blue-600 transition duration-200 shadow-lg transform hover:scale-[1.01]">
+                        Telegram Kanaliga Qo'shilish va Boshlash 🚀
+                    </a>
+                </div>
+            `;
+            // Tugmani bosish orqali avtomatik tekshirishni ishga tushirish
+            document.getElementById('telegram-link-and-verify').addEventListener('click', (event) => {
+                // Telegramga o'tishga ruxsat berish
+                simulateTelegramVerification();
+            });
+        };
+
+        const simulateTelegramVerification = () => {
+            // SIMULYATSIYA: Tekshirish muvaffaqiyatli deb hisoblanadi
+            state.isSubscribed = true;
+            showModal("Tekshirish Muvaffaqiyatli!", "✅ Kirish Ruxsat Berildi! Sinovlardan zavqlaning!", false);
+            navigateTo('home');
+        };
+
+        const renderHomePage = (container) => {
+            container.innerHTML = `
+                <h2 class="text-3xl font-extrabold text-gray-800 mb-6 flex items-center">
+                    Bugungi Sinovlar (${new Date().toLocaleDateString('uz-UZ', { month: 'long', day: 'numeric' })}) 🔥
+                </h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    ${state.quizzes.map(q => `
+                        <div class="quiz-card p-6 bg-white rounded-xl shadow-lg border-l-4 border-indigo-500 transition-all hover:shadow-xl hover:scale-[1.02] cursor-pointer" data-quiz-type="${q.type}">
+                            <div class="flex items-center space-x-3 mb-3">
+                                <span class="text-3xl">${q.emoji}</span>
+                                <h3 class="text-xl font-semibold text-gray-900">${q.name}</h3>
+                            </div>
+                            <p class="text-sm text-gray-500 mb-4">${q.description}</p>
+                            <div class="flex justify-between items-center text-sm font-medium">
+                                <span class="text-indigo-600">${q.totalQuestions} Savollar</span>
+                                <span class="text-green-600">${q.totalPoints} Maksimal Ball</span>
+                            </div>
+                            <button class="w-full mt-4 py-2 bg-indigo-500 text-white rounded-lg font-bold hover:bg-indigo-600 transition" onclick="startQuiz('${q.type}')">
+                                Sinovni Boshlash
+                            </button>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="pt-8 text-center">
+                    <button class="text-lg font-bold text-gray-800 hover:text-indigo-600 transition flex items-center justify-center mx-auto space-x-2" onclick="navigateTo('leaderboard')">
+                        <span class="text-2xl">🏆</span> 
+                        <span>Global Yetakchilar Kengashini Ko'rish</span>
+                    </button>
+                </div>
+            `;
+        };
+
+        const renderQuizPage = (container) => {
+            if (!state.currentQuiz) {
+                navigateTo('home');
+                return;
+            }
+
+            const quiz = state.currentQuiz;
+            const question = quiz.questions[state.currentQuestionIndex];
+            const progress = ((state.currentQuestionIndex + 1) / quiz.questions.length) * 100;
+            const currentScore = state.currentQuizScore;
+            
+            container.innerHTML = `
+                <div class="max-w-2xl mx-auto bg-white p-6 rounded-xl shadow-2xl space-y-6">
+                    <div class="flex justify-between items-center border-b pb-3 mb-4">
+                        <h2 class="text-2xl font-bold text-gray-800">${quiz.name}</h2>
+                        <span class="text-xl font-semibold text-green-600">Ball: ${currentScore}</span>
+                    </div>
+
+                    <!-- Taraqqiyot Paneli -->
+                    <div class="mb-6">
+                        <div class="text-sm font-medium text-gray-600 mb-1">
+                            Savol ${state.currentQuestionIndex + 1} / ${quiz.questions.length}
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-3">
+                            <div class="bg-indigo-500 h-3 rounded-full transition-all duration-500" style="width: ${progress}%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Savol Karti -->
+                    <div class="bg-indigo-50 p-6 rounded-lg border-l-4 border-indigo-500">
+                        <p class="text-xl font-semibold text-gray-900">${question.text}</p>
+                        <p class="text-sm text-indigo-600 mt-2 font-medium">${question.points} Ball mavjud</p>
+                    </div>
+
+                    <!-- Variantlar -->
+                    <div id="options-container" class="space-y-4">
+                        ${question.options.map((option, index) => `
+                            <button 
+                                class="w-full text-left p-4 bg-gray-100 rounded-xl hover:bg-indigo-100 transition duration-150 shadow-md font-medium text-gray-700 option-btn"
+                                data-answer="${option}"
+                                onclick="handleAnswer('${option}')"
+                            >
+                                ${String.fromCharCode(65 + index)}. ${option}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderResultPage = (container) => {
+            const quiz = state.currentQuiz;
+            const percentage = ((state.currentQuizScore / quiz.totalPoints) * 100).toFixed(0);
+            const isHighScore = percentage >= 70;
+            
+            container.innerHTML = `
+                <div class="max-w-md mx-auto p-8 rounded-2xl shadow-2xl text-center space-y-6 ${isHighScore ? 'bg-green-100 border-4 border-green-500' : 'bg-yellow-100 border-4 border-yellow-500'}">
+                    <span class="text-6xl block">${isHighScore ? '🎉' : '👏'}</span>
+                    <h2 class="text-3xl font-extrabold text-gray-800">Sinov Yakunlandi!</h2>
+                    
+                    <p class="text-lg font-semibold text-gray-700">
+                        Siz <span class="text-3xl font-bold ${isHighScore ? 'text-green-600' : 'text-yellow-700'}">${state.currentQuizScore}</span> / ${quiz.totalPoints} ball to'pladingiz.
+                    </p>
+                    
+                    <div class="w-3/4 mx-auto my-4">
+                        <p class="text-sm font-medium text-gray-600 mb-1">Natija</p>
+                        <div class="w-full bg-gray-300 rounded-full h-4">
+                            <div class="h-4 rounded-full transition-all duration-700 ${isHighScore ? 'bg-green-500' : 'bg-yellow-600'}" style="width: ${percentage}%"></div>
+                        </div>
+                        <p class="text-xs mt-1 text-gray-500">${percentage}% To'g'ri javob</p>
+                    </div>
+
+                    <div class="pt-4 border-t ${isHighScore ? 'border-green-300' : 'border-yellow-300'} space-y-3">
+                        <button class="w-full py-3 bg-indigo-500 text-white font-bold rounded-lg hover:bg-indigo-600 transition" onclick="navigateTo('home')">
+                            Kundalik Sinovlarga Qaytish
+                        </button>
+                        <button class="w-full py-3 bg-gray-200 text-gray-800 font-bold rounded-lg hover:bg-gray-300 transition" onclick="navigateTo('leaderboard')">
+                            Yetakchilar Kengashini Ko'rish 🏆
+                        </button>
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderLeaderboardPage = async (container) => {
+            container.innerHTML = `
+                <div class="max-w-2xl mx-auto bg-white p-6 rounded-xl shadow-2xl">
+                    <h2 class="text-3xl font-extrabold text-gray-800 mb-6 flex items-center justify-between">
+                        Global Yetakchilar Kengashi 🏆
+                        <button class="text-sm text-indigo-500 hover:text-indigo-600 font-medium" onclick="navigateTo('home')">
+                            ← Bosh Sahifaga
+                        </button>
+                    </h2>
+                    <div id="leaderboard-loading" class="text-center p-8 text-lg text-gray-500">
+                        Eng yuqori ballar yuklanmoqda... <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-500 mx-auto mt-2"></div>
+                    </div>
+                    <ul id="leaderboard-list" class="space-y-3 hidden scroll-area max-h-96 overflow-y-auto">
+                        <!-- Yetakchilar ro'yxati shu yerga kiritiladi -->
+                    </ul>
+                </div>
+            `;
+            await fetchLeaderboard();
+        };
+        
+        const fetchLeaderboard = async () => {
+            if (!db) return;
+            const leaderboardList = document.getElementById('leaderboard-list');
+            const loadingIndicator = document.getElementById('leaderboard-loading');
+
+            if (!leaderboardList || !loadingIndicator) return;
+
+            try {
+                const leaderboardCollectionRef = getPublicLeaderboardCollectionRef();
+                // Firestore'dan ma'lumotlarni olish
+                const q = query(leaderboardCollectionRef, limit(20)); // Yetakchilar kengashini tuzish uchun 20 tagacha ma'lumot olish
+                const querySnapshot = await getDocs(q);
+
+                let scores = [];
+                querySnapshot.forEach((doc) => {
+                    scores.push(doc.data());
+                });
+
+                // Ma'lumotlarni ball bo'yicha saralash
+                scores.sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
+                scores = scores.slice(0, 10); // Eng yaxshi 10 talikni qoldirish
+
+                leaderboardList.innerHTML = scores.map((score, index) => {
+                    const rank = index + 1;
+                    const isCurrentUser = score.userId === userId;
+                    let rankIcon = '';
+                    if (rank === 1) rankIcon = '🥇';
+                    else if (rank === 2) rankIcon = '🥈';
+                    else if (rank === 3) rankIcon = '🥉';
+                    else rankIcon = `#${rank}`;
+
+                    return `
+                        <li class="flex justify-between items-center p-4 rounded-lg shadow-sm ${isCurrentUser ? 'bg-indigo-100 font-bold border-2 border-indigo-500' : 'bg-gray-50'}">
+                            <span class="text-xl w-10">${rankIcon}</span>
+                            <span class="flex-grow text-gray-800 truncate">${isCurrentUser ? `${score.userName} (Siz)` : score.userName}</span>
+                            <span class="text-2xl font-extrabold text-green-600 ml-4">${score.totalScore || 0}</span>
+                        </li>
+                    `;
+                }).join('');
+
+                loadingIndicator.classList.add('hidden');
+                leaderboardList.classList.remove('hidden');
+
+            } catch (e) {
+                console.error("Yetakchilar kengashini yuklashda xato:", e);
+                loadingIndicator.textContent = "Yetakchilar ballarini yuklab bo'lmadi.";
+                loadingIndicator.classList.remove('hidden');
+                leaderboardList.classList.add('hidden');
+            }
+        };
+
+
+        // --- ILOVANI BOSHQARISH MANTIQI ---
+
+        window.navigateTo = (page) => {
+            state.currentPage = page;
+            renderPage();
+        };
+
+        window.startQuiz = (type) => {
+            const quiz = state.quizzes.find(q => q.type === type);
+            if (quiz) {
+                state.currentQuiz = quiz;
+                state.currentQuestionIndex = 0;
+                state.currentQuizScore = 0;
+                state.quizInProgress = true;
+                navigateTo('quiz');
+            }
+        };
+
+        window.handleAnswer = (selectedOption) => {
+            if (!state.quizInProgress) return;
+
+            const quiz = state.currentQuiz;
+            const question = quiz.questions[state.currentQuestionIndex];
+            const optionsContainer = document.getElementById('options-container');
+            const btns = optionsContainer.querySelectorAll('.option-btn');
+            
+            // Javobni qulflash
+            btns.forEach(btn => btn.setAttribute('disabled', 'true'));
+
+            const isCorrect = selectedOption === question.answer;
+            let earnedPoints = 0;
+
+            if (isCorrect) {
+                earnedPoints = question.points;
+                state.currentQuizScore += earnedPoints;
+                // To'g'ri javobni yashil rangda belgilash
+                btns.forEach(btn => {
+                    if (btn.dataset.answer === selectedOption) {
+                        btn.classList.add('bg-green-200', 'border-green-600', 'shadow-xl', 'ring-4', 'ring-green-400');
+                    }
+                });
+            } else {
+                // Noto'g'ri javobni qizil rangda, to'g'risini esa yashil fon bilan belgilash
+                btns.forEach(btn => {
+                    if (btn.dataset.answer === selectedOption) {
+                        btn.classList.add('bg-red-200', 'border-red-600', 'shadow-xl', 'ring-4', 'ring-red-400');
+                    } else if (btn.dataset.answer === question.answer) {
+                        btn.classList.add('bg-green-100', 'border-green-600', 'border'); 
+                    }
+                });
+            }
+
+            // Keyingi savolga o'tish
+            setTimeout(() => {
+                state.currentQuestionIndex++;
+
+                if (state.currentQuestionIndex < quiz.questions.length) {
+                    navigateTo('quiz'); // Keyingi savol
+                } else {
+                    // Sinov yakunlandi! Umumiy ballni yangilash va ma'lumotlarni saqlash.
+                    state.userTotalScore += state.currentQuizScore;
+                    state.quizInProgress = false;
+                    updateScoreDisplay();
+                    saveUserData();
+                    updatePublicScore(state.currentQuizScore, quiz.name);
+                    navigateTo('result');
+                }
+            }, 1500); // 1.5 soniya kutish
+        };
+
+
+        // --- ISHGA TUSHIRISH VA AUTENTIFIKATSIYA ---
+
+        const initializeAppAndAuth = async () => {
+            if (db) {
+                try {
+                    // 1. Maxsus Token bilan tizimga kirish (agar mavjud bo'lsa)
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                        console.log("Maxsus token bilan tizimga kirildi.");
+                    } else {
+                        // 2. Aks holda Anonim tarzda kirish
+                        await signInAnonymously(auth);
+                        console.log("Anonim tarzda tizimga kirildi.");
+                    }
+                } catch (error) {
+                    console.error("Firebase Autentifikatsiya Xatosi:", error);
+                    // Kiritishdagi jiddiy xato
+                    document.getElementById('page-content').innerHTML = `
+                        <div class="text-center p-8 bg-red-100 text-red-700 rounded-lg">
+                            <h2 class="text-xl font-bold">Autentifikatsiya Xatoligi</h2>
+                            <p>Foydalanuvchi ma'lumotlar bazasiga ulanib bo'lmadi. Iltimos, sahifani yangilang.</p>
+                        </div>
+                    `;
+                    return;
+                }
+            }
+
+            // 3. Autentifikatsiya Holatini Kuzatuvchi (userId ni olish uchun muhim)
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    userId = user.uid;
+                    isAuthReady = true;
+                    // 4. Foydalanuvchi ma'lumotlarini yuklash va sinovlarni boshlash
+                    await loadUserData();
+                    getDailyQuestions();
+                    renderPage();
+                }
+            });
+        };
+
+        // Ilovani ishga tushirish
+        window.onload = initializeAppAndAuth;
+
+    </script>
+</body>
+</html>
